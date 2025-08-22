@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Where to?</title>
+<style>
+  body{font:16px/1.4 system-ui,-apple-system,Segoe UI,Roboto,Arial;margin:0;padding:24px;background:#fafafa;color:#111}
+  .wrap{max-width:520px;margin:0 auto}
+  h1{font-size:22px;margin:8px 0 16px}
+  .sub{color:#555;margin-bottom:16px}
+  label{display:block;font-weight:600;margin:16px 0 6px}
+  input{width:100%;padding:12px 14px;border:1px solid #ddd;border-radius:12px;outline:0}
+  .row{display:flex;gap:12px;margin-top:16px}
+  button,.btn{background:#111;color:#fff;border:0;border-radius:999px;padding:12px 18px;font-weight:700;cursor:pointer;text-decoration:none;display:inline-block}
+  .ghost{background:#fff;color:#111;border:1px solid #ddd}
+  .help{font-size:12px;color:#777;margin-top:8px}
+  .map{height:0}
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Where to?</h1>
+    <div class="sub">Enter your pickup location and destination</div>
+
+    <label for="pickup">Pickup Location</label>
+    <input id="pickup" placeholder="Enter pickup location" autocomplete="off"/>
+
+    <div class="row">
+      <button id="use-gps" class="ghost" type="button">Use Current Location</button>
+      <a class="ghost btn" href="/" style="flex:0 0 auto">Home</a>
+    </div>
+    <div class="help">We use your phone&apos;s GPS to fill your pickup.</div>
+
+    <label for="dest">Destination</label>
+    <input id="dest" placeholder="Where are you going?" autocomplete="off"/>
+
+    <div class="row">
+      <button id="continue" class="btn" type="button">Continue</button>
+      <a class="ghost btn" href="/pay">Pay Now</a>
+    </div>
+
+    <div id="map" class="map" aria-hidden="true"></div>
+  </div>
+
+  <script>
+    // Lightweight loader: when google maps script ready -> init
+    (function loadGoogle(){
+      const s=document.createElement("script");
+      s.src="https://maps.googleapis.com/maps/api/js?key=YOUR_GOOGLE_MAPS_API_KEY_HERE&libraries=places";
+      s.async=true; s.defer=true; s.onload=init; document.head.appendChild(s);
+    })();
+
+    function waitForPlaces(cb){
+      if (window.google && google.maps && google.maps.places) cb();
+      else setTimeout(() => waitForPlaces(cb), 100);
+    }
+
+    function init(){ waitForPlaces(setup); }
+
+    let pickupAC, destAC, pickupPlace, destPlace;
+
+    function setup(){
+      const pickup = document.getElementById("pickup");
+      const dest   = document.getElementById("dest");
+
+      // Places Autocomplete (addresses)
+      pickupAC = new google.maps.places.Autocomplete(pickup, { fields: ["formatted_address","geometry","place_id","name"], types:["address"] });
+      destAC   = new google.maps.places.Autocomplete(dest,   { fields: ["formatted_address","geometry","place_id","name"], types:["address"] });
+
+      pickupAC.addListener("place_changed", () => { pickupPlace = pickupAC.getPlace(); });
+      destAC.addListener("place_changed",   () => { destPlace   = destAC.getPlace(); });
+
+      // Use Current Location
+      document.getElementById("use-gps").addEventListener("click", () => {
+        if (!navigator.geolocation) { alert("GPS not available"); return; }
+        navigator.geolocation.getCurrentPosition(async (pos) => {
+          const lat=pos.coords.latitude, lng=pos.coords.longitude;
+          try {
+            const url = "https://maps.googleapis.com/maps/api/geocode/json?latlng="+lat+","+lng+"&key=YOUR_GOOGLE_MAPS_API_KEY_HERE";
+            const r = await fetch(url); const j = await r.json();
+            const best = (j.results && j.results[0]) || null;
+            const addr = best ? best.formatted_address : (lat.toFixed(5)+", "+lng.toFixed(5));
+            pickup.value = addr;
+            pickupPlace = {
+              formatted_address: addr,
+              geometry: { location: { lat: () => lat, lng: () => lng } },
+              place_id: best ? best.place_id : null,
+              name: "Current location"
+            };
+          } catch(e){ alert("Could not reverse geocode current location"); }
+        }, (err)=>{ alert("GPS error: "+err.message); }, { enableHighAccuracy:true, timeout:10000, maximumAge:0 });
+      });
+
+      // Continue: stash in localStorage for your app to read later
+      document.getElementById("continue").addEventListener("click", () => {
+        const pick = pickupPlace || { formatted_address: pickup.value };
+        const drop = destPlace   || { formatted_address: dest.value };
+        if (!pick.formatted_address || !drop.formatted_address) {
+          alert("Please enter both pickup and destination."); return;
+        }
+        const data = {
+          pickup: {
+            address: pick.formatted_address,
+            place_id: pick.place_id || null,
+            lat: pick.geometry?.location?.lat ? pick.geometry.location.lat() : null,
+            lng: pick.geometry?.location?.lng ? pick.geometry.location.lng() : null
+          },
+          destination: {
+            address: drop.formatted_address,
+            place_id: drop.place_id || null,
+            lat: drop.geometry?.location?.lat ? drop.geometry.location.lat() : null,
+            lng: drop.geometry?.location?.lng ? drop.geometry.location.lng() : null
+          },
+          saved_at: new Date().toISOString()
+        };
+        localStorage.setItem("ride_draft", JSON.stringify(data));
+        // Redirect wherever your flow continues (adjust this)
+        window.location.href = "/pay"; // or "/"
+      });
+    }
+  </script>
+</body>
+</html>
